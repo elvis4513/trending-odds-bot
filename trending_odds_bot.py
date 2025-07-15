@@ -1,11 +1,12 @@
-import requests
+import threading
 import time
+import requests
 from datetime import datetime
 import pytz
+from flask import Flask
 from telegram import Bot
-from telegram.ext import Updater, CommandHandler
 
-# --- Config ---
+# --- CONFIG ---
 ODDS_API_KEY = "72c9b4a891ab427ecfc55777f7110a8c"
 TELEGRAM_BOT_TOKEN = "7692195219:AAHbR-7wZFcDK1t9GFj_I2gn_4J2_hCKp7A"
 TELEGRAM_CHAT_ID = "1205297695"
@@ -13,9 +14,17 @@ SPORT = "soccer"
 REGIONS = "eu,uk,us"
 MARKETS = "totals"
 ODDS_API_URL = f"https://api.the-odds-api.com/v4/sports/{SPORT}/odds/"
-
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+# Used to track old odds
 previous_odds = {}
+
+# Flask server to keep Render alive
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return '⚽ Trending Odds Bot is Running!'
 
 def send_telegram(message):
     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode="HTML")
@@ -69,38 +78,24 @@ def process_odds(data):
                             previous_odds[odds_key] = current_price
     return trending
 
-def scan_and_alert():
-    data = fetch_odds()
-    trending = process_odds(data)
-    if trending:
-        for item in trending:
-            message = (
-                f"🔥 <b>Trending Match Alert</b>\n\n"
-                f"🏟️ <b>{item['match']}</b>\n"
-                f"🕘 Kickoff: {item['kickoff']}\n"
-                f"📉 Market: {item['market']}\n"
-                f"📊 Odds dropped: {item['drop']} ({item['bookmaker']})\n\n"
-                f"📈 High betting interest detected!"
-            )
-            send_telegram(message)
-    else:
-        print("No trending matches found in this scan.")
-
-def start(update, context):
-    update.message.reply_text("👋 Bot is running. You will receive trending match alerts automatically.")
-
-def main():
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start", start))
-
-    # Start polling Telegram commands
-    updater.start_polling()
-
-    # Run the odds scanner every 60 seconds
+def scan_loop():
     while True:
-        scan_and_alert()
+        data = fetch_odds()
+        trending = process_odds(data)
+        if trending:
+            for item in trending:
+                message = (
+                    f"🔥 <b>Trending Match Alert</b>\n\n"
+                    f"🏟️ <b>{item['match']}</b>\n"
+                    f"🕘 Kickoff: {item['kickoff']}\n"
+                    f"📉 Market: {item['market']}\n"
+                    f"📊 Odds dropped: {item['drop']} ({item['bookmaker']})\n\n"
+                    f"📈 High betting interest detected!"
+                )
+                send_telegram(message)
         time.sleep(60)
 
-if __name__ == "__main__":
-    main()
+# Run Flask app + background scanner
+if __name__ == '__main__':
+    threading.Thread(target=scan_loop).start()
+    app.run(host='0.0.0.0', port=10000)
